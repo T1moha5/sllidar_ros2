@@ -62,7 +62,8 @@ class SLlidarNode : public rclcpp::Node
     : Node("sllidar_node")
     {
 
-      scan_pub = this->create_publisher<sensor_msgs::msg::LaserScan>("scan", rclcpp::SensorDataQoS());
+      scan_pub = this->create_publisher<sensor_msgs::msg::LaserScan>(
+        "scan", rclcpp::SensorDataQoS().keep_last(1));
       tf_buffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
       tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
       
@@ -368,20 +369,17 @@ public:
             op_result = drv->grabScanDataHq(nodes, count);
             end_scan_time = this->now();
             scan_duration = (end_scan_time - start_scan_time).seconds();
+            const rclcpp::Time scan_stamp = start_scan_time;
 
-            // Проверяем наличие tf перед публикацией scan
-            bool tf_ready = false;
-            try {
-                auto transform = tf_buffer_->lookupTransform("base_link", "laser", tf2::TimePointZero, tf2::durationFromSec(0.1));
-                tf_ready = true;
-            } catch (tf2::TransformException &ex) {
-                // Можно оставить только для отладки:
-                // RCLCPP_DEBUG_THROTTLE(this->get_logger(), *this->get_clock(), 5000, "TF base_link->laser not available yet: %s", ex.what());
-            }
-
-            if (!tf_ready) {
-                rclcpp::spin_some(shared_from_this());
-                continue;
+            if (!static_tf_ready_) {
+                try {
+                    tf_buffer_->lookupTransform(
+                        "base_link", "laser", tf2::TimePointZero, tf2::durationFromSec(0.05));
+                    static_tf_ready_ = true;
+                } catch (tf2::TransformException &) {
+                    rclcpp::spin_some(shared_from_this());
+                    continue;
+                }
             }
 
             if (op_result == SL_RESULT_OK) {
@@ -411,9 +409,8 @@ public:
                             }
                         }
     
-                        rclcpp::Clock system_clock(RCL_SYSTEM_TIME);
                         publish_scan(scan_pub, angle_compensate_nodes, angle_compensate_nodes_count,
-                                system_clock.now(), scan_duration, inverted,
+                                scan_stamp, scan_duration, inverted,
                                 angle_min, angle_max, max_distance,
                                 frame_id);
 
@@ -434,9 +431,8 @@ public:
                         angle_min = DEG2RAD(getAngle(nodes[start_node]));
                         angle_max = DEG2RAD(getAngle(nodes[end_node]));
 
-                        rclcpp::Clock system_clock(RCL_SYSTEM_TIME);
                         publish_scan(scan_pub, &nodes[start_node], end_node-start_node +1,
-                                system_clock.now(), scan_duration, inverted,
+                                scan_stamp, scan_duration, inverted,
                                 angle_min, angle_max, max_distance,
                                 frame_id);
                     }
@@ -444,15 +440,12 @@ public:
                     // All the data is invalid, just publish them
                     float angle_min = DEG2RAD(0.0f);
                     float angle_max = DEG2RAD(359.0f);
-                    rclcpp::Clock system_clock(RCL_SYSTEM_TIME);
                     publish_scan(scan_pub, nodes, count,
-                                system_clock.now(), scan_duration, inverted,
+                                scan_stamp, scan_duration, inverted,
                                 angle_min, angle_max, max_distance,
                                 frame_id);
                 }
             }
-
-            rclcpp::spin_some(shared_from_this());
         }
 
         // done!
@@ -470,6 +463,7 @@ public:
     rclcpp::Service<std_srvs::srv::Empty>::SharedPtr stop_motor_service;
     std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
     std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
+    bool static_tf_ready_{false};
 
     std::string channel_type;
     std::string tcp_ip;
