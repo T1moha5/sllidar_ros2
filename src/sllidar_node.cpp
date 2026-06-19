@@ -369,7 +369,8 @@ public:
             op_result = drv->grabScanDataHq(nodes, count);
             end_scan_time = this->now();
             scan_duration = (end_scan_time - start_scan_time).seconds();
-            const rclcpp::Time scan_stamp = start_scan_time;
+            // Stamp at scan completion so /scan time is not behind high-rate odom.
+            const rclcpp::Time scan_stamp = end_scan_time;
 
             if (!static_tf_ready_) {
                 try {
