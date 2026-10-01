@@ -87,6 +87,9 @@ class SLlidarNode : public rclcpp::Node
         this->declare_parameter<std::string>("scan_mode",std::string());
         this->declare_parameter<double>("scan_frequency", 10.0);
         this->declare_parameter<double>("scan_light_intensity_min", 200.0);
+        // Same FOV as sem50/yaml/crop_180.yaml (keep front ±crop rad).
+        this->declare_parameter<double>("scan_crop_angle_min", -1.57);
+        this->declare_parameter<double>("scan_crop_angle_max", 1.57);
         
         this->get_parameter_or<std::string>("channel_type", channel_type, "serial");
         this->get_parameter_or<std::string>("tcp_ip", tcp_ip, "192.168.0.7"); 
@@ -100,6 +103,8 @@ class SLlidarNode : public rclcpp::Node
         this->get_parameter_or<bool>("angle_compensate", angle_compensate, false);
         this->get_parameter_or<std::string>("scan_mode", scan_mode, std::string());
         this->get_parameter_or<double>("scan_light_intensity_min", scan_light_intensity_min, 200.0);
+        this->get_parameter_or<double>("scan_crop_angle_min", scan_crop_angle_min, -1.57);
+        this->get_parameter_or<double>("scan_crop_angle_max", scan_crop_angle_max, 1.57);
         if(channel_type == "udp")
             this->get_parameter_or<double>("scan_frequency", scan_frequency, 20.0);
         else
@@ -259,6 +264,17 @@ class SLlidarNode : public rclcpp::Node
                 else
                     scan_msg->ranges[node_count-1-i] = read_value;
                 scan_msg->intensities[node_count-1-i] = (float) nodes[i].quality;
+            }
+        }
+
+        // Match crop_180: keep only [scan_crop_angle_min, scan_crop_angle_max].
+        if (scan_crop_angle_max > scan_crop_angle_min) {
+            for (size_t i = 0; i < scan_msg->ranges.size(); ++i) {
+                const double ang =
+                    scan_msg->angle_min + static_cast<double>(i) * scan_msg->angle_increment;
+                if (ang < scan_crop_angle_min || ang > scan_crop_angle_max) {
+                    scan_msg->ranges[i] = std::numeric_limits<float>::infinity();
+                }
             }
         }
 
@@ -496,6 +512,8 @@ public:
     std::string scan_mode;
     double scan_frequency;
     double scan_light_intensity_min = 200.0;
+    double scan_crop_angle_min = -1.57;
+    double scan_crop_angle_max = 1.57;
 
     ILidarDriver * drv;    
 };
