@@ -267,12 +267,13 @@ class SLlidarNode : public rclcpp::Node
             }
         }
 
-        // Match crop_180: keep only [scan_crop_angle_min, scan_crop_angle_max].
+        // Match crop_180 LaserScanSectorFilter (keep through ±π = robot forward
+        // with laser yaw≈π): clear the near-zero sector (crop_min, crop_max).
         if (scan_crop_angle_max > scan_crop_angle_min) {
             for (size_t i = 0; i < scan_msg->ranges.size(); ++i) {
                 const double ang =
                     scan_msg->angle_min + static_cast<double>(i) * scan_msg->angle_increment;
-                if (ang < scan_crop_angle_min || ang > scan_crop_angle_max) {
+                if (ang > scan_crop_angle_min && ang < scan_crop_angle_max) {
                     scan_msg->ranges[i] = std::numeric_limits<float>::infinity();
                 }
             }
