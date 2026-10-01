@@ -64,6 +64,8 @@ class SLlidarNode : public rclcpp::Node
 
       scan_pub = this->create_publisher<sensor_msgs::msg::LaserScan>(
         "scan", rclcpp::SensorDataQoS().keep_last(1));
+      scan_light_pub = this->create_publisher<sensor_msgs::msg::LaserScan>(
+        "scan_light", rclcpp::SensorDataQoS().keep_last(1));
       tf_buffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
       tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
       
@@ -83,7 +85,8 @@ class SLlidarNode : public rclcpp::Node
         this->declare_parameter<bool>("inverted", false);
         this->declare_parameter<bool>("angle_compensate", false);
         this->declare_parameter<std::string>("scan_mode",std::string());
-        this->declare_parameter<float>("scan_frequency",10);
+        this->declare_parameter<double>("scan_frequency", 10.0);
+        this->declare_parameter<double>("scan_light_intensity_min", 200.0);
         
         this->get_parameter_or<std::string>("channel_type", channel_type, "serial");
         this->get_parameter_or<std::string>("tcp_ip", tcp_ip, "192.168.0.7"); 
@@ -96,10 +99,11 @@ class SLlidarNode : public rclcpp::Node
         this->get_parameter_or<bool>("inverted", inverted, false);
         this->get_parameter_or<bool>("angle_compensate", angle_compensate, false);
         this->get_parameter_or<std::string>("scan_mode", scan_mode, std::string());
+        this->get_parameter_or<double>("scan_light_intensity_min", scan_light_intensity_min, 200.0);
         if(channel_type == "udp")
-            this->get_parameter_or<float>("scan_frequency", scan_frequency, 20.0);
+            this->get_parameter_or<double>("scan_frequency", scan_frequency, 20.0);
         else
-            this->get_parameter_or<float>("scan_frequency", scan_frequency, 10.0);
+            this->get_parameter_or<double>("scan_frequency", scan_frequency, 10.0);
     }
 
     bool getSLLIDARDeviceInfo(ILidarDriver * drv)
@@ -244,7 +248,8 @@ class SLlidarNode : public rclcpp::Node
                     scan_msg->ranges[i] = std::numeric_limits<float>::infinity();
                 else
                     scan_msg->ranges[i] = read_value;
-                scan_msg->intensities[i] = (float) (nodes[i].quality >> 2);
+                // HQ quality is 0..255; keep full scale so intensity threshold is meaningful
+                scan_msg->intensities[i] = (float) nodes[i].quality;
             }
         } else {
             for (size_t i = 0; i < node_count; i++) {
@@ -253,11 +258,20 @@ class SLlidarNode : public rclcpp::Node
                     scan_msg->ranges[node_count-1-i] = std::numeric_limits<float>::infinity();
                 else
                     scan_msg->ranges[node_count-1-i] = read_value;
-                scan_msg->intensities[node_count-1-i] = (float) (nodes[i].quality >> 2);
+                scan_msg->intensities[node_count-1-i] = (float) nodes[i].quality;
             }
         }
 
         pub->publish(*scan_msg);
+
+        // High-intensity-only scan: keep points with intensity > threshold
+        auto scan_light_msg = *scan_msg;
+        for (size_t i = 0; i < scan_light_msg.ranges.size(); ++i) {
+            if (scan_light_msg.intensities[i] <= scan_light_intensity_min) {
+                scan_light_msg.ranges[i] = std::numeric_limits<float>::infinity();
+            }
+        }
+        scan_light_pub->publish(scan_light_msg);
     }
 public:    
     int work_loop()
@@ -460,6 +474,7 @@ public:
 
   private:
     rclcpp::Publisher<sensor_msgs::msg::LaserScan>::SharedPtr scan_pub;
+    rclcpp::Publisher<sensor_msgs::msg::LaserScan>::SharedPtr scan_light_pub;
     rclcpp::Service<std_srvs::srv::Empty>::SharedPtr start_motor_service;
     rclcpp::Service<std_srvs::srv::Empty>::SharedPtr stop_motor_service;
     std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
@@ -479,7 +494,8 @@ public:
     float max_distance = 8.0;
     size_t angle_compensate_multiple = 1;//it stand of angle compensate at per 1 degree
     std::string scan_mode;
-    float scan_frequency;
+    double scan_frequency;
+    double scan_light_intensity_min = 200.0;
 
     ILidarDriver * drv;    
 };
